@@ -1,0 +1,13 @@
+server-name: "lobby"
+lobby-server-name: "lobby"
+api-enabled-servers:
+  - "lobby"
+  - "rpg"
+  - "island"
+  - "collect"
+database:
+  host: "localhost"
+  port: 3306
+  name: "content_db"
+  user: "root"
+  password: ""
