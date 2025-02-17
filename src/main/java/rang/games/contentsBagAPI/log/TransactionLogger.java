@@ -40,33 +40,27 @@ public class TransactionLogger {
     }
 
     public void info(String format, Object... args) {
-        String message;
-        if (args != null && args.length > 0) {
-            message = String.format(format, args);
-        } else {
-            message = format;
+        String message = format;
+        for (Object arg : args) {
+            message = message.replaceFirst("\\{\\}", String.valueOf(arg));
         }
         logger.info(message);
         logToFile("INFO", message);
     }
 
     public void warn(String format, Object... args) {
-        String message;
-        if (args != null && args.length > 0) {
-            message = String.format(format, args);
-        } else {
-            message = format;
+        String message = format;
+        for (Object arg : args) {
+            message = message.replaceFirst("\\{\\}", String.valueOf(arg));
         }
         logger.warning(message);
         logToFile("WARN", message);
     }
 
     public void error(String format, Object... args) {
-        String message;
-        if (args != null && args.length > 0) {
-            message = String.format(format, args);
-        } else {
-            message = format;
+        String message = format;
+        for (Object arg : args) {
+            message = message.replaceFirst("\\{\\}", String.valueOf(arg));
         }
         logger.severe(message);
         logToFile("ERROR", message);

@@ -1,9 +1,11 @@
 package rang.games.contentsBagAPI.api;
 
+import rang.games.contentsBagAPI.log.TransactionLogger;
 import rang.games.contentsBagAPI.model.ContentItem;
 import rang.games.contentsBagAPI.model.PlayerData;
 import rang.games.contentsBagAPI.storage.Storage;
 
+import java.util.LinkedHashMap;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.Map;
@@ -12,9 +14,12 @@ import java.util.Collections;
 public class ContentAPI {
     private static ContentAPI instance;
     private final Storage storage;
+    private final TransactionLogger logger;
 
     private ContentAPI(Storage storage) {
         this.storage = storage;
+        this.logger = storage.getLogger();
+
     }
 
     public static void init(Storage storage) {
@@ -29,7 +34,29 @@ public class ContentAPI {
         }
         return instance;
     }
-
+    public CompletableFuture<Boolean> prepareAndTransferServer(UUID playerUUID, String targetServer) {
+        return saveDirtyState(playerUUID)
+                .thenCompose(saved -> {
+                    if (!saved) {
+                        logger.error("Failed to save dirty state for player {}", playerUUID);
+                        return CompletableFuture.completedFuture(false);
+                    }
+                    return setContentBagModifiable(playerUUID, false);
+                })
+                .thenCompose(disabled -> {
+                    if (!disabled) {
+                        logger.error("Failed to disable content bag for player {}", playerUUID);
+                        return CompletableFuture.completedFuture(false);
+                    }
+                    return storage.handleServerTransfer(playerUUID, targetServer);
+                })
+                .exceptionally(e -> {
+                    logger.error("Server transfer preparation failed for player {}: {}",
+                            playerUUID, e.getMessage());
+                    setContentBagModifiable(playerUUID, true);
+                    return false;
+                });
+    }
     /**
      * 플레이어의 특정 아이템 수량을 조회합니다.
      * @param playerUUID 플레이어 UUID
@@ -62,6 +89,33 @@ public class ContentAPI {
         }
 
         return storage.setItemCount(playerUUID, contentItemUUID, count, reason);
+    }
+
+    /**
+     * API를 사용하지 않는 서버로 이동할 때 호출되는 메소드
+     */
+    public CompletableFuture<Boolean> prepareNonApiServerTransfer(UUID playerUUID, String targetServer) {
+        return saveDirtyState(playerUUID)
+                .thenCompose(saved -> {
+                    if (!saved) {
+                        logger.error("Failed to save data for non-API server transfer: {}", playerUUID);
+                        return CompletableFuture.completedFuture(false);
+                    }
+                    return storage.handleServerTransfer(playerUUID, targetServer);
+                });
+    }
+
+    public CompletableFuture<Boolean> saveDirtyState(UUID playerUUID) {
+        PlayerData playerData = storage.getPlayerData(playerUUID);
+        if (playerData == null || !playerData.isDirty() || storage.isPlayerLoading(playerUUID)) {
+            return CompletableFuture.completedFuture(true);
+        }
+
+        return storage.savePlayerData(playerUUID);
+    }
+
+    public CompletableFuture<Boolean> setContentBagModifiable(UUID playerUUID, boolean enabled) {
+        return storage.setDataModifiable(playerUUID, enabled);
     }
 
     /**
@@ -109,6 +163,23 @@ public class ContentAPI {
      */
     public Map<UUID, ContentItem> getItemsByType(int type) {
         return storage.getItemStorage().getItemsByType(type);
+    }
+
+    public Map<UUID, ContentItem> getItemsByType(int type, int offset, int limit) {
+        Map<UUID, ContentItem> originalMap = storage.getItemStorage().getItemsByType(type);
+        Map<UUID, ContentItem> result = new LinkedHashMap<>();
+
+        int index = 0;
+        for (Map.Entry<UUID, ContentItem> entry : originalMap.entrySet()) {
+            if (index >= offset && result.size() < limit) {
+                result.put(entry.getKey(), entry.getValue());
+            }
+            if (result.size() >= limit) {
+                break;
+            }
+            index++;
+        }
+        return result;
     }
 
     /**

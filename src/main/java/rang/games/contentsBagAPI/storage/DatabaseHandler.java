@@ -37,6 +37,30 @@ public class DatabaseHandler implements AutoCloseable {
         this.dataSource = new HikariDataSource(hikariConfig);
         initializeTables();
     }
+
+
+    public CompletableFuture<Boolean> updateDataStatus(UUID playerUUID, String status) {
+        return CompletableFuture.supplyAsync(() -> {
+            String sql = """
+            UPDATE server_status 
+            SET data_status = ?
+            WHERE player_uuid = ?
+            """;
+
+            try (Connection conn = dataSource.getConnection();
+                 PreparedStatement stmt = conn.prepareStatement(sql)) {
+
+                stmt.setString(1, status);
+                stmt.setString(2, playerUUID.toString());
+
+                int updated = stmt.executeUpdate();
+                return updated > 0;
+            } catch (Exception e) {
+                logger.error("Failed to update data status for player {}: {}", playerUUID, e.getMessage());
+                return false;
+            }
+        });
+    }
     public boolean isDataActive(UUID playerUUID) {
         String sql = "SELECT data_status FROM server_status WHERE player_uuid = ?";
         try (Connection conn = dataSource.getConnection();
@@ -54,6 +78,28 @@ public class DatabaseHandler implements AutoCloseable {
             logger.error("Failed to check data status for player {}: {}", playerUUID, e.getMessage());
             return false;
         }
+    }
+    public CompletableFuture<Boolean> validateDataStatus(UUID playerUUID) {
+        return CompletableFuture.supplyAsync(() -> {
+            String sql = """
+            SELECT data_status, transfer_status 
+            FROM server_status 
+            WHERE player_uuid = ? AND data_status = 'READONLY'
+            """;
+
+            try (Connection conn = dataSource.getConnection();
+                 PreparedStatement stmt = conn.prepareStatement(sql)) {
+
+                stmt.setString(1, playerUUID.toString());
+                ResultSet rs = stmt.executeQuery();
+
+                return rs.next();
+            } catch (Exception e) {
+                logger.error("Failed to validate data status for player {}: {}",
+                        playerUUID, e.getMessage());
+                return false;
+            }
+        });
     }
     private void initializeTables() {
         String createItemsTable = """
@@ -154,36 +200,51 @@ public class DatabaseHandler implements AutoCloseable {
             String statusSql = "SELECT data_status FROM server_status WHERE player_uuid = ?";
 
             try (Connection conn = dataSource.getConnection()) {
+                if (playerUUID == null) {
+                    logger.error("Attempted to load player data with null UUID");
+                    return Optional.empty();
+                }
+
+                String playerUUIDString = playerUUID.toString();
+
                 try (PreparedStatement statusStmt = conn.prepareStatement(statusSql)) {
-                    statusStmt.setString(1, playerUUID.toString());
+                    statusStmt.setString(1, playerUUIDString);
                     ResultSet statusRs = statusStmt.executeQuery();
 
                     if (!statusRs.next()) {
+                        logger.info("No status found for player {}, initializing new player", playerUUIDString);
                         return initializeNewPlayer(conn, playerUUID);
                     }
                 }
 
+                PlayerData playerData = new PlayerData(playerUUID);
                 try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-                    stmt.setString(1, playerUUID.toString());
+                    stmt.setString(1, playerUUIDString);
                     ResultSet rs = stmt.executeQuery();
 
-                    PlayerData playerData = new PlayerData(playerUUID);
-                    boolean hasData = false;
-
                     while (rs.next()) {
-                        hasData = true;
-                        UUID itemUUID = UUID.fromString(rs.getString("Product"));
-                        int count = rs.getInt("Count");
-                        playerData.setItemCount(itemUUID, count);
-                    }
+                        String productUUIDString = rs.getString("Product");
+                        if (productUUIDString == null || productUUIDString.equals("<none>")) {
+                            logger.warn("Invalid product UUID found for player {}: {}",
+                                    playerUUIDString, productUUIDString);
+                            continue;
+                        }
 
-                    if (!hasData) {
-                        logger.info("No item data found for player {}, treating as new player", playerUUID);
+                        try {
+                            UUID itemUUID = UUID.fromString(productUUIDString);
+                            int count = rs.getInt("Count");
+                            playerData.setItemCount(itemUUID, count);
+                        } catch (IllegalArgumentException e) {
+                            logger.error("Invalid UUID format for player {}, product: {}",
+                                    playerUUIDString, productUUIDString);
+                            continue;
+                        }
                     }
-
-                    playerData.clearDirty();
-                    return Optional.of(playerData);
                 }
+
+                playerData.clearDirty();
+                return Optional.of(playerData);
+
             } catch (Exception e) {
                 logger.error("Failed to load player data for {}: {}", playerUUID, e.getMessage());
                 return Optional.empty();
@@ -192,7 +253,21 @@ public class DatabaseHandler implements AutoCloseable {
     }
     public CompletableFuture<Boolean> savePlayerData(PlayerData data) {
         return CompletableFuture.supplyAsync(() -> {
-            String sql = """
+            String selectSql = "SELECT Product FROM player_data WHERE UUID = ?";
+            Set<UUID> existingItems = new HashSet<>();
+
+            try (Connection conn = dataSource.getConnection()) {
+                conn.setAutoCommit(false);
+
+                try (PreparedStatement selectStmt = conn.prepareStatement(selectSql)) {
+                    selectStmt.setString(1, data.getPlayerUUID().toString());
+                    ResultSet rs = selectStmt.executeQuery();
+                    while (rs.next()) {
+                        existingItems.add(UUID.fromString(rs.getString("Product")));
+                    }
+                }
+
+                String upsertSql = """
                 INSERT INTO player_data (UUID, Product, Count, Lastupdate)
                 VALUES (?, ?, ?, ?)
                 ON DUPLICATE KEY UPDATE
@@ -200,21 +275,34 @@ public class DatabaseHandler implements AutoCloseable {
                 Lastupdate = VALUES(Lastupdate)
                 """;
 
-            try (Connection conn = dataSource.getConnection();
-                 PreparedStatement stmt = conn.prepareStatement(sql)) {
+                try (PreparedStatement upsertStmt = conn.prepareStatement(upsertSql)) {
+                    Map<UUID, Integer> currentCounts = data.getItemCounts();
+                    long updateTime = System.currentTimeMillis();
 
-                conn.setAutoCommit(false);
-                long updateTime = System.currentTimeMillis();
+                    for (Map.Entry<UUID, Integer> entry : currentCounts.entrySet()) {
+                        upsertStmt.setString(1, data.getPlayerUUID().toString());
+                        upsertStmt.setString(2, entry.getKey().toString());
+                        upsertStmt.setInt(3, entry.getValue());
+                        upsertStmt.setLong(4, updateTime);
+                        upsertStmt.addBatch();
+                        existingItems.remove(entry.getKey());
+                    }
 
-                for (Map.Entry<UUID, Integer> entry : data.getItemCounts().entrySet()) {
-                    stmt.setString(1, data.getPlayerUUID().toString());
-                    stmt.setString(2, entry.getKey().toString());
-                    stmt.setInt(3, entry.getValue());
-                    stmt.setLong(4, updateTime);
-                    stmt.addBatch();
+                    if (!existingItems.isEmpty()) {
+                        String deleteSql = "DELETE FROM player_data WHERE UUID = ? AND Product = ?";
+                        try (PreparedStatement deleteStmt = conn.prepareStatement(deleteSql)) {
+                            for (UUID itemUUID : existingItems) {
+                                deleteStmt.setString(1, data.getPlayerUUID().toString());
+                                deleteStmt.setString(2, itemUUID.toString());
+                                deleteStmt.addBatch();
+                            }
+                            deleteStmt.executeBatch();
+                        }
+                    }
+
+                    upsertStmt.executeBatch();
                 }
 
-                stmt.executeBatch();
                 conn.commit();
                 return true;
             } catch (Exception e) {
@@ -261,48 +349,44 @@ public class DatabaseHandler implements AutoCloseable {
     }
     public CompletableFuture<Boolean> updateServerInfo(UUID playerUUID, String fromServer, String toServer) {
         return CompletableFuture.supplyAsync(() -> {
-            if (!config.isApiEnabledServer(toServer)) {
-                return handleNonApiServerTransfer(playerUUID, fromServer, toServer);
-            }
-
             try (Connection conn = dataSource.getConnection()) {
                 conn.setAutoCommit(false);
 
                 try {
                     String trackingSql = """
-                        INSERT INTO server_tracking 
-                        (player_uuid, from_server, to_server, timestamp, status)
-                        VALUES (?, ?, ?, ?, ?)
-                        """;
+                    INSERT INTO server_tracking 
+                    (player_uuid, from_server, to_server, timestamp, status)
+                    VALUES (?, ?, ?, ?, 'TRANSFER_STARTED')
+                    """;
 
                     try (PreparedStatement stmt = conn.prepareStatement(trackingSql)) {
                         stmt.setString(1, playerUUID.toString());
                         stmt.setString(2, fromServer);
                         stmt.setString(3, toServer);
                         stmt.setLong(4, System.currentTimeMillis());
-                        stmt.setString(5, "TRANSFER_STARTED");
                         stmt.executeUpdate();
                     }
 
                     String statusSql = """
-                        INSERT INTO server_status 
-                        (player_uuid, current_server, last_server, last_update, transfer_status, data_status)
-                        VALUES (?, ?, ?, ?, TRUE, 'ACTIVE')
-                        ON DUPLICATE KEY UPDATE
-                        last_server = current_server,
-                        current_server = ?,
-                        last_update = ?,
-                        transfer_status = TRUE,
-                        data_status = 'ACTIVE'
-                        """;
+                    INSERT INTO server_status 
+                    (player_uuid, current_server, last_server, last_update, transfer_status, data_status)
+                    VALUES (?, ?, ?, ?, TRUE, 'READONLY')
+                    ON DUPLICATE KEY UPDATE
+                    last_server = current_server,
+                    current_server = ?,
+                    last_update = ?,
+                    transfer_status = TRUE,
+                    data_status = 'READONLY'
+                    """;
 
                     try (PreparedStatement stmt = conn.prepareStatement(statusSql)) {
+                        long currentTime = System.currentTimeMillis();
                         stmt.setString(1, playerUUID.toString());
                         stmt.setString(2, toServer);
                         stmt.setString(3, fromServer);
-                        stmt.setLong(4, System.currentTimeMillis());
+                        stmt.setLong(4, currentTime);
                         stmt.setString(5, toServer);
-                        stmt.setLong(6, System.currentTimeMillis());
+                        stmt.setLong(6, currentTime);
                         stmt.executeUpdate();
                     }
 
@@ -319,23 +403,22 @@ public class DatabaseHandler implements AutoCloseable {
             }
         });
     }
-
-    private boolean handleNonApiServerTransfer(UUID playerUUID, String fromServer, String toServer) {
+    public boolean handleNonApiServerTransfer(UUID playerUUID, String fromServer, String toServer) {
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
 
             try {
                 String statusSql = """
-                    INSERT INTO server_status 
-                    (player_uuid, current_server, last_server, last_update, transfer_status, data_status)
-                    VALUES (?, ?, ?, ?, FALSE, 'SUSPENDED')
-                    ON DUPLICATE KEY UPDATE
-                    last_server = current_server,
-                    current_server = ?,
-                    last_update = ?,
-                    transfer_status = FALSE,
-                    data_status = 'SUSPENDED'
-                    """;
+                INSERT INTO server_status 
+                (player_uuid, current_server, last_server, last_update, transfer_status, data_status)
+                VALUES (?, ?, ?, ?, FALSE, 'SUSPENDED')
+                ON DUPLICATE KEY UPDATE
+                last_server = current_server,
+                current_server = ?,
+                last_update = ?,
+                transfer_status = FALSE,
+                data_status = 'SUSPENDED'
+                """;
 
                 try (PreparedStatement stmt = conn.prepareStatement(statusSql)) {
                     long currentTime = System.currentTimeMillis();
@@ -348,18 +431,17 @@ public class DatabaseHandler implements AutoCloseable {
                     stmt.executeUpdate();
                 }
 
-                String trackingSql = """
-                    INSERT INTO server_tracking 
-                    (player_uuid, from_server, to_server, timestamp, status)
-                    VALUES (?, ?, ?, ?, ?)
-                    """;
+                    String trackingSql = """
+                INSERT INTO server_tracking 
+                (player_uuid, from_server, to_server, timestamp, status)
+                VALUES (?, ?, ?, ?, 'TRANSFERRED_TO_NON_API_SERVER')
+                """;
 
                 try (PreparedStatement stmt = conn.prepareStatement(trackingSql)) {
                     stmt.setString(1, playerUUID.toString());
                     stmt.setString(2, fromServer);
                     stmt.setString(3, toServer);
                     stmt.setLong(4, System.currentTimeMillis());
-                    stmt.setString(5, "TRANSFERRED_TO_NON_API_SERVER");
                     stmt.executeUpdate();
                 }
 
@@ -376,7 +458,6 @@ public class DatabaseHandler implements AutoCloseable {
             return false;
         }
     }
-
     public CompletableFuture<List<ContentItem>> loadItemsByType(int type) {
         return CompletableFuture.supplyAsync(() -> {
             String sql = "SELECT * FROM items WHERE Type = ?";

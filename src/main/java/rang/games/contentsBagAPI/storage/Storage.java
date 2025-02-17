@@ -4,6 +4,7 @@ import rang.games.contentsBagAPI.config.ConfigManager;
 import rang.games.contentsBagAPI.log.TransactionLogger;
 import rang.games.contentsBagAPI.model.PlayerData;
 
+import javax.xml.crypto.Data;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -28,7 +29,15 @@ public class Storage {
         this.scheduler = Executors.newScheduledThreadPool(1);
         startAutoSave();
     }
-
+    public ConfigManager getConfigManager() {
+        return config;
+    }
+    public DatabaseHandler getDatabaseHandler() {
+        return databaseHandler;
+    }
+    public TransactionLogger getLogger() {
+        return logger;
+    }
     private void startAutoSave() {
         scheduler.scheduleAtFixedRate(() -> {
             playerData.values().stream()
@@ -38,7 +47,10 @@ public class Storage {
     }
 
     public CompletableFuture<Boolean> setItemCount(UUID playerUUID, UUID itemUUID, int count, String reason) {
-
+        if (!databaseHandler.isDataActive(playerUUID)) {
+            logger.warn("Cannot modify data for player {} - data is not active", playerUUID);
+            return CompletableFuture.completedFuture(false);
+        }
         if (count < 0 || isPlayerLoading(playerUUID)) {
             return CompletableFuture.completedFuture(false);
         }
@@ -74,6 +86,10 @@ public class Storage {
     }
 
     public CompletableFuture<Boolean> addItemCount(UUID playerUUID, UUID itemUUID, int amount, String reason) {
+        if (!databaseHandler.isDataActive(playerUUID)) {
+            logger.warn("Cannot modify data for player {} - data is not active", playerUUID);
+            return CompletableFuture.completedFuture(false);
+        }
         if (amount <= 0 || isPlayerLoading(playerUUID)) {
             return CompletableFuture.completedFuture(false);
         }
@@ -89,6 +105,10 @@ public class Storage {
 
 
     public CompletableFuture<Boolean> removeItemCount(UUID playerUUID, UUID itemUUID, int amount, String reason) {
+        if (!databaseHandler.isDataActive(playerUUID)) {
+            logger.warn("Cannot modify data for player {} - data is not active", playerUUID);
+            return CompletableFuture.completedFuture(false);
+        }
         if (amount <= 0 || isPlayerLoading(playerUUID)) {
             return CompletableFuture.completedFuture(false);
         }
@@ -108,9 +128,6 @@ public class Storage {
 
 
     public CompletableFuture<Boolean> loadPlayerData(UUID playerUUID) {
-        if (isPlayerLoading(playerUUID)) {
-            return CompletableFuture.completedFuture(false);
-        }
 
         return databaseHandler.loadPlayerData(playerUUID)
                 .thenApply(optionalData -> {
@@ -151,19 +168,31 @@ public class Storage {
                     return success;
                 });
     }
-
+    public CompletableFuture<Boolean> setDataModifiable(UUID playerUUID, boolean enabled) {
+        String status = enabled ? "ACTIVE" : "READONLY";
+        return databaseHandler.updateDataStatus(playerUUID, status)
+                .thenApply(success -> {
+                    if (success && !enabled) {
+                        PlayerData data = playerData.get(playerUUID);
+                        if (data != null && data.isDirty()) {
+                            return savePlayerData(playerUUID).join();
+                        }
+                    }
+                    return success;
+                });
+    }
     public CompletableFuture<Boolean> handleServerTransfer(UUID playerUUID, String targetServer) {
         PlayerData data = playerData.get(playerUUID);
         if (data == null || isPlayerLoading(playerUUID)) {
             return CompletableFuture.completedFuture(false);
         }
-
-        return databaseHandler.updateServerInfo(playerUUID, config.getServerName(), targetServer)
-                .thenCompose(success -> {
-                    if (success && data.isDirty()) {
-                        return savePlayerData(playerUUID);
+        return savePlayerData(playerUUID)
+                .thenCompose(saved -> {
+                    if (!saved) {
+                        logger.error("Failed to save player data before server transfer: {}", playerUUID);
+                        return CompletableFuture.completedFuture(false);
                     }
-                    return CompletableFuture.completedFuture(true);
+                    return databaseHandler.updateServerInfo(playerUUID, config.getServerName(), targetServer);
                 })
                 .thenApply(success -> {
                     if (success) {
