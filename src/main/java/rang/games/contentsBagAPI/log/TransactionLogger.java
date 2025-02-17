@@ -39,36 +39,37 @@ public class TransactionLogger {
         }
     }
 
-    public void logServerSwitch(UUID playerUUID, String playerName, String fromServer, String toServer, String status) {
-        String timestamp = LocalDateTime.now().format(dateFormatter);
-        String logMessage = String.format("[%s] Player: %s (%s) | Server Switch: %s → %s | Status: %s",
-                timestamp, playerName, playerUUID, fromServer, toServer, status);
-
-        logger.info(logMessage);
-
-        try (PrintWriter writer = new PrintWriter(new FileWriter(logFile, true))) {
-            writer.println(logMessage);
-        } catch (Exception e) {
-            logger.warning("Failed to write to transaction log file: " + e.getMessage());
+    public void info(String format, Object... args) {
+        String message;
+        if (args != null && args.length > 0) {
+            message = String.format(format, args);
+        } else {
+            message = format;
         }
+        logger.info(message);
+        logToFile("INFO", message);
     }
 
-    public void info(String message, Object... args) {
-        String formattedMessage = String.format(message, args);
-        logger.info(formattedMessage);
-        logToFile("INFO", formattedMessage);
+    public void warn(String format, Object... args) {
+        String message;
+        if (args != null && args.length > 0) {
+            message = String.format(format, args);
+        } else {
+            message = format;
+        }
+        logger.warning(message);
+        logToFile("WARN", message);
     }
 
-    public void warn(String message, Object... args) {
-        String formattedMessage = String.format(message, args);
-        logger.warning(formattedMessage);
-        logToFile("WARN", formattedMessage);
-    }
-
-    public void error(String message, Object... args) {
-        String formattedMessage = String.format(message, args);
-        logger.severe(formattedMessage);
-        logToFile("ERROR", formattedMessage);
+    public void error(String format, Object... args) {
+        String message;
+        if (args != null && args.length > 0) {
+            message = String.format(format, args);
+        } else {
+            message = format;
+        }
+        logger.severe(message);
+        logToFile("ERROR", message);
     }
 
     private void logToFile(String level, String message) {

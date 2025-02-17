@@ -7,10 +7,7 @@ import rang.games.contentsBagAPI.log.TransactionLogger;
 import rang.games.contentsBagAPI.model.ContentItem;
 import rang.games.contentsBagAPI.model.PlayerData;
 
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.Statement;
+import java.sql.*;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -151,33 +148,48 @@ public class DatabaseHandler implements AutoCloseable {
             return items;
         });
     }
-
     public CompletableFuture<Optional<PlayerData>> loadPlayerData(UUID playerUUID) {
         return CompletableFuture.supplyAsync(() -> {
             String sql = "SELECT Product, Count FROM player_data WHERE UUID = ?";
+            String statusSql = "SELECT data_status FROM server_status WHERE player_uuid = ?";
 
-            try (Connection conn = dataSource.getConnection();
-                 PreparedStatement stmt = conn.prepareStatement(sql)) {
+            try (Connection conn = dataSource.getConnection()) {
+                try (PreparedStatement statusStmt = conn.prepareStatement(statusSql)) {
+                    statusStmt.setString(1, playerUUID.toString());
+                    ResultSet statusRs = statusStmt.executeQuery();
 
-                stmt.setString(1, playerUUID.toString());
-                ResultSet rs = stmt.executeQuery();
-
-                PlayerData playerData = new PlayerData(playerUUID);
-                while (rs.next()) {
-                    UUID itemUUID = UUID.fromString(rs.getString("Product"));
-                    int count = rs.getInt("Count");
-                    playerData.setItemCount(itemUUID, count);
+                    if (!statusRs.next()) {
+                        return initializeNewPlayer(conn, playerUUID);
+                    }
                 }
-                playerData.clearDirty();
 
-                return Optional.of(playerData);
+                try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+                    stmt.setString(1, playerUUID.toString());
+                    ResultSet rs = stmt.executeQuery();
+
+                    PlayerData playerData = new PlayerData(playerUUID);
+                    boolean hasData = false;
+
+                    while (rs.next()) {
+                        hasData = true;
+                        UUID itemUUID = UUID.fromString(rs.getString("Product"));
+                        int count = rs.getInt("Count");
+                        playerData.setItemCount(itemUUID, count);
+                    }
+
+                    if (!hasData) {
+                        logger.info("No item data found for player {}, treating as new player", playerUUID);
+                    }
+
+                    playerData.clearDirty();
+                    return Optional.of(playerData);
+                }
             } catch (Exception e) {
                 logger.error("Failed to load player data for {}: {}", playerUUID, e.getMessage());
                 return Optional.empty();
             }
         });
     }
-
     public CompletableFuture<Boolean> savePlayerData(PlayerData data) {
         return CompletableFuture.supplyAsync(() -> {
             String sql = """
@@ -213,6 +225,40 @@ public class DatabaseHandler implements AutoCloseable {
         });
     }
 
+    private Optional<PlayerData> initializeNewPlayer(Connection conn, UUID playerUUID) throws SQLException {
+        logger.info("Initializing new player data for {}", playerUUID);
+
+        String initStatusSql = """
+        INSERT INTO server_status 
+        (player_uuid, current_server, last_update, transfer_status, data_status)
+        VALUES (?, ?, ?, FALSE, 'ACTIVE')
+        """;
+
+        try (PreparedStatement stmt = conn.prepareStatement(initStatusSql)) {
+            stmt.setString(1, playerUUID.toString());
+            stmt.setString(2, config.getServerName());
+            stmt.setLong(3, System.currentTimeMillis());
+            stmt.executeUpdate();
+        }
+
+        PlayerData newPlayerData = new PlayerData(playerUUID);
+        newPlayerData.clearDirty();
+
+        String trackingSql = """
+        INSERT INTO server_tracking 
+        (player_uuid, from_server, to_server, timestamp, status)
+        VALUES (?, 'NONE', ?, ?, 'NEW_PLAYER')
+        """;
+
+        try (PreparedStatement stmt = conn.prepareStatement(trackingSql)) {
+            stmt.setString(1, playerUUID.toString());
+            stmt.setString(2, config.getServerName());
+            stmt.setLong(3, System.currentTimeMillis());
+            stmt.executeUpdate();
+        }
+
+        return Optional.of(newPlayerData);
+    }
     public CompletableFuture<Boolean> updateServerInfo(UUID playerUUID, String fromServer, String toServer) {
         return CompletableFuture.supplyAsync(() -> {
             if (!config.isApiEnabledServer(toServer)) {
