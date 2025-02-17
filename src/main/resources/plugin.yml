@@ -1,0 +1,4 @@
+name: ContentsBagAPI
+version: '1.0-SNAPSHOT'
+main: rang.games.contentsBagAPI.ContentPlugin
+api-version: '1.21'
