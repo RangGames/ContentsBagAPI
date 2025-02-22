@@ -34,6 +34,42 @@ public class ContentAPI {
         }
         return instance;
     }
+    public CompletableFuture<Boolean> recoverFromFailedTransfer(UUID playerUUID) {
+        if (storage.isPlayerLoading(playerUUID)) {
+            logger.error("Cannot recover player {} - data is still loading", playerUUID);
+            return CompletableFuture.completedFuture(false);
+        }
+
+        return storage.validateTransferStatus(playerUUID)
+                .thenCompose(isTransferring -> {
+                    if (!isTransferring) {
+                        logger.warn("Player {} is not in transfer state, recovery not needed", playerUUID);
+                        return CompletableFuture.completedFuture(false);
+                    }
+                    return setContentBagModifiable(playerUUID, true)
+                            .thenCompose(success -> {
+                                if (!success) {
+                                    logger.error("Failed to reactivate content bag for player {}", playerUUID);
+                                    return CompletableFuture.completedFuture(false);
+                                }
+
+                                return storage.loadPlayerData(playerUUID)
+                                        .thenApply(loaded -> {
+                                            if (!loaded) {
+                                                logger.error("Failed to reload data for player {}", playerUUID);
+                                                return false;
+                                            }
+                                            logger.info("Successfully recovered from failed transfer for player {}", playerUUID);
+                                            return true;
+                                        });
+                            });
+                })
+                .exceptionally(e -> {
+                    logger.error("Error during transfer recovery for player {}: {}",
+                            playerUUID, e.getMessage());
+                    return false;
+                });
+    }
     public CompletableFuture<Boolean> prepareAndTransferServer(UUID playerUUID, String targetServer) {
         return saveDirtyState(playerUUID)
                 .thenCompose(saved -> {

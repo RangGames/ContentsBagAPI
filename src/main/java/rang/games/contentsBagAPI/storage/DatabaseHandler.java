@@ -79,6 +79,7 @@ public class DatabaseHandler implements AutoCloseable {
             return false;
         }
     }
+
     public CompletableFuture<Boolean> validateDataStatus(UUID playerUUID) {
         return CompletableFuture.supplyAsync(() -> {
             String sql = """

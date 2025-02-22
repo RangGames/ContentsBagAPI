@@ -32,6 +32,9 @@ public class Storage {
     public ConfigManager getConfigManager() {
         return config;
     }
+    public CompletableFuture<Boolean> validateTransferStatus(UUID playerUUID) {
+        return databaseHandler.validateDataStatus(playerUUID);
+    }
     public DatabaseHandler getDatabaseHandler() {
         return databaseHandler;
     }
