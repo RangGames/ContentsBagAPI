@@ -169,7 +169,7 @@ public class DatabaseHandler implements AutoCloseable {
 
     public CompletableFuture<Map<UUID, ContentItem>> loadItems() {
         return CompletableFuture.supplyAsync(() -> {
-            String sql = "SELECT * FROM items";
+            String sql = "SELECT * FROM items WHERE Access = 1 ORDER BY Type ASC, Slot ASC";
             Map<UUID, ContentItem> items = new HashMap<>();
 
             try (Connection conn = dataSource.getConnection();
@@ -461,7 +461,7 @@ public class DatabaseHandler implements AutoCloseable {
     }
     public CompletableFuture<List<ContentItem>> loadItemsByType(int type) {
         return CompletableFuture.supplyAsync(() -> {
-            String sql = "SELECT * FROM items WHERE Type = ?";
+            String sql = "SELECT * FROM items WHERE Type = ? AND Access = 1 ORDER BY Slot ASC";
             List<ContentItem> items = new ArrayList<>();
 
             try (Connection conn = dataSource.getConnection();

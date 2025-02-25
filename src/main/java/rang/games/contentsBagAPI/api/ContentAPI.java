@@ -5,11 +5,9 @@ import rang.games.contentsBagAPI.model.ContentItem;
 import rang.games.contentsBagAPI.model.PlayerData;
 import rang.games.contentsBagAPI.storage.Storage;
 
-import java.util.LinkedHashMap;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
-import java.util.Map;
-import java.util.Collections;
+import java.util.stream.Collectors;
 
 public class ContentAPI {
     private static ContentAPI instance;
@@ -171,6 +169,9 @@ public class ContentAPI {
         return setItemCount(playerUUID, contentItemUUID, currentCount + amount,
                 String.format("%s (Add: %d)", reason, amount));
     }
+    public Storage getStorage() {
+        return storage;
+    }
 
     /**
      * 플레이어의 특정 아이템 수량을 감소시킵니다.
@@ -198,24 +199,31 @@ public class ContentAPI {
      * 특정 타입의 모든 콘텐츠 아이템을 조회합니다.
      */
     public Map<UUID, ContentItem> getItemsByType(int type) {
-        return storage.getItemStorage().getItemsByType(type);
+        Map<UUID, ContentItem> originalMap = storage.getItemStorage().getItemsByType(type);
+
+        return originalMap.entrySet().stream()
+                .sorted(Map.Entry.comparingByValue(Comparator.comparing(ContentItem::getSlot)))
+                .collect(Collectors.toMap(
+                        Map.Entry::getKey,
+                        Map.Entry::getValue,
+                        (e1, e2) -> e1,
+                        LinkedHashMap::new
+                ));
     }
 
     public Map<UUID, ContentItem> getItemsByType(int type, int offset, int limit) {
         Map<UUID, ContentItem> originalMap = storage.getItemStorage().getItemsByType(type);
-        Map<UUID, ContentItem> result = new LinkedHashMap<>();
 
-        int index = 0;
-        for (Map.Entry<UUID, ContentItem> entry : originalMap.entrySet()) {
-            if (index >= offset && result.size() < limit) {
-                result.put(entry.getKey(), entry.getValue());
-            }
-            if (result.size() >= limit) {
-                break;
-            }
-            index++;
-        }
-        return result;
+        return originalMap.entrySet().stream()
+                .sorted(Map.Entry.comparingByValue(Comparator.comparing(ContentItem::getSlot)))
+                .skip(offset)
+                .limit(limit)
+                .collect(Collectors.toMap(
+                        Map.Entry::getKey,
+                        Map.Entry::getValue,
+                        (e1, e2) -> e1,
+                        LinkedHashMap::new
+                ));
     }
 
     /**

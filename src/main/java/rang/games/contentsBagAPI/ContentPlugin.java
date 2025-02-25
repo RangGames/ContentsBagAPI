@@ -8,12 +8,14 @@ import rang.games.contentsBagAPI.event.EventListener;
 import rang.games.contentsBagAPI.log.TransactionLogger;
 import rang.games.contentsBagAPI.storage.Storage;
 
+import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+
 
 public class ContentPlugin extends JavaPlugin {
     private Storage storage;
     private TransactionLogger logger;
     private ConfigManager configManager;
-
     @Override
     public void onEnable() {
         saveDefaultConfig();
@@ -32,17 +34,40 @@ public class ContentPlugin extends JavaPlugin {
                 .thenAccept(success -> {
                     if (success) {
                         logger.info("Successfully loaded all items");
+                        // Load data for all online players
+                        getServer().getOnlinePlayers().forEach(player -> {
+                            UUID playerUUID = player.getUniqueId();
+                            String playerName = player.getName();
+
+                            storage.setPlayerLoading(playerUUID, true);
+                            storage.loadPlayerData(playerUUID)
+                                    .thenCompose(loaded -> {
+                                        if (loaded) {
+                                            logger.info("Successfully loaded data for online player {}", playerName);
+                                            return ContentAPI.getInstance().setContentBagModifiable(playerUUID, true);
+                                        } else {
+                                            logger.error("Failed to load data for online player {}", playerName);
+                                            return CompletableFuture.completedFuture(false);
+                                        }
+                                    })
+                                    .thenAccept(result -> {
+                                        storage.setPlayerLoading(playerUUID, false);
+                                        if (!result) {
+                                            logger.error("Failed to setup player data for online player {}", playerName);
+                                        }
+                                    })
+                                    .exceptionally(e -> {
+                                        storage.setPlayerLoading(playerUUID, false);
+                                        logger.error("Error loading data for online player {}: {}",
+                                                playerName, e.getMessage());
+                                        return null;
+                                    });
+                        });
                     } else {
                         logger.error("Failed to load items");
                     }
                 });
-
-        //getCommand("cbs").setExecutor(new ItemCommand(this));
-        //getCommand("cbs").setTabCompleter(new ItemCommand(this));
-
-
     }
-
     @Override
     public void onDisable() {
         if (storage != null) {
