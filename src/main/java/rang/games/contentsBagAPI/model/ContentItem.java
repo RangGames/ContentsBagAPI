@@ -66,6 +66,9 @@ public class ContentItem {
         return uuid;
     }
 
+    public ItemStack getItemStack() {
+        return itemStack;
+    }
     public String getItemName() {
         return itemName;
     }
