@@ -54,6 +54,10 @@ public class ItemStorage {
         );
     }
 
+    public Map<UUID, ContentItem> getAllItems() {
+        return Collections.unmodifiableMap(itemsById);
+    }
+
     public boolean isInitialLoadComplete() {
         return initialLoadComplete;
     }

@@ -250,4 +250,70 @@ public class ContentAPI {
     public boolean isPlayerDataLoading(UUID playerUUID) {
         return storage.isPlayerLoading(playerUUID);
     }
+
+    /**
+     * 이름으로 아이템을 검색합니다.
+     * 아이템의 이름 필드가 있으면 그것을 사용합니다.
+     *
+     * @param name 검색할 아이템 이름 (대소문자 구분 없음)
+     * @return 이름이 포함된 아이템 맵 (UUID, ContentItem)
+     */
+    public Map<UUID, ContentItem> searchItemsByName(String name) {
+        if (name == null || name.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        String searchName = name.toLowerCase();
+        Map<UUID, ContentItem> allItems = storage.getItemStorage().getAllItems();
+
+        return allItems.entrySet().stream()
+                .filter(entry -> {
+                    ContentItem item = entry.getValue();
+                    String itemName = item.getItemName();
+                    if (itemName != null && itemName.toLowerCase().contains(searchName)) {
+                        return true;
+                    }
+                    return false;
+                })
+                .collect(Collectors.toMap(
+                        Map.Entry::getKey,
+                        Map.Entry::getValue,
+                        (e1, e2) -> e1,
+                        LinkedHashMap::new
+                ));
+    }
+
+    /**
+     * 이름으로 아이템을 검색하고 페이지네이션을 적용합니다.
+     *
+     * @param name 검색할 아이템 이름 (대소문자 구분 없음)
+     * @param offset 시작 인덱스
+     * @param limit 검색 결과 최대 개수
+     * @return 이름이 포함된 아이템 맵 (UUID, ContentItem)
+     */
+    public Map<UUID, ContentItem> searchItemsByName(String name, int offset, int limit) {
+        if (name == null || name.isEmpty() || offset < 0 || limit <= 0) {
+            return Collections.emptyMap();
+        }
+
+        String searchName = name.toLowerCase();
+        Map<UUID, ContentItem> allItems = storage.getItemStorage().getAllItems();
+
+        return allItems.entrySet().stream()
+                .filter(entry -> {
+                    ContentItem item = entry.getValue();
+                    String itemName = item.getItemName();
+                    if (itemName != null && itemName.toLowerCase().contains(searchName)) {
+                        return true;
+                    }
+                    return false;
+                })
+                .skip(offset)
+                .limit(limit)
+                .collect(Collectors.toMap(
+                        Map.Entry::getKey,
+                        Map.Entry::getValue,
+                        (e1, e2) -> e1,
+                        LinkedHashMap::new
+                ));
+    }
 }
