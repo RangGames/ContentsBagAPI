@@ -6,7 +6,7 @@
 
     <groupId>rang.games</groupId>
     <artifactId>ContentsBagAPI</artifactId>
-    <version>1.0.3-SNAPSHOT</version>
+    <version>1.0.6-SNAPSHOT</version>
     <packaging>jar</packaging>
 
     <name>ContentsBagAPI</name>
@@ -78,10 +78,18 @@
             <version>5.1.0</version>
         </dependency>
         <dependency>
-            <groupId>rang.games</groupId>
+            <groupId>games.rang</groupId>
             <artifactId>allplayersutil</artifactId>
-            <version>2.0.4.4-SNAPSHOT</version>
-            <scope>provided</scope>
+            <version>2.0.4.7-SNAPSHOT</version>
+            <scope>system</scope>
+            <systemPath>${project.basedir}/libs/allplayersutil-2.0.4.7-SNAPSHOT.jar</systemPath>
+        </dependency>
+        <dependency>
+            <groupId>games.rang</groupId>
+            <artifactId>LangUtils</artifactId>
+            <version>1.10</version>
+            <scope>system</scope>
+            <systemPath>${project.basedir}/libs/LangUtils-1.10.jar</systemPath>
         </dependency>
         <dependency>
             <groupId>com.github.SkriptLang</groupId>

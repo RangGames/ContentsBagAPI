@@ -4,5 +4,6 @@ main: rang.games.contentsBagAPI.ContentPlugin
 api-version: '1.21'
 depend:
   - AllPlayersUtil
+  - LangUtils
 softdepend:
   - Skript

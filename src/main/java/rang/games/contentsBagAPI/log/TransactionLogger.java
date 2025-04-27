@@ -30,7 +30,7 @@ public class TransactionLogger {
         String logMessage = String.format("[%s] Player: %s | Item: %s | Change: %s (%d → %d) | Reason: %s",
                 timestamp, playerUUID, itemUUID, change, oldCount, newCount, reason);
 
-        logger.info(logMessage);
+        //logger.info(logMessage);
 
         try (PrintWriter writer = new PrintWriter(new FileWriter(logFile, true))) {
             writer.println(logMessage);
@@ -44,7 +44,7 @@ public class TransactionLogger {
         for (Object arg : args) {
             message = message.replaceFirst("\\{\\}", String.valueOf(arg));
         }
-        logger.info(message);
+        //logger.info(message);
         logToFile("INFO", message);
     }
 
@@ -53,7 +53,7 @@ public class TransactionLogger {
         for (Object arg : args) {
             message = message.replaceFirst("\\{\\}", String.valueOf(arg));
         }
-        logger.warning(message);
+        //logger.warning(message);
         logToFile("WARN", message);
     }
 
@@ -62,7 +62,7 @@ public class TransactionLogger {
         for (Object arg : args) {
             message = message.replaceFirst("\\{\\}", String.valueOf(arg));
         }
-        logger.severe(message);
+        //logger.severe(message);
         logToFile("ERROR", message);
     }
 

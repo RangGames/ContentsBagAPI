@@ -2,7 +2,6 @@ package rang.games.contentsBagAPI;
 
 import org.bukkit.plugin.java.JavaPlugin;
 import rang.games.contentsBagAPI.api.ContentAPI;
-import rang.games.contentsBagAPI.command.ItemCommand;
 import rang.games.contentsBagAPI.config.ConfigManager;
 import rang.games.contentsBagAPI.event.EventListener;
 import rang.games.contentsBagAPI.log.TransactionLogger;
